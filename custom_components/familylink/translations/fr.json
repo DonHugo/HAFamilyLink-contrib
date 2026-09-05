@@ -32,9 +32,10 @@
 			},
 			"manual_url": {
 				"title": "URL du serveur d'authentification",
-				"description": "Aucune source d'authentification locale n'a été détectée. Veuillez entrer l'URL de votre conteneur Family Link Auth.\n\nExemple : `http://192.168.1.100:8099` ou `http://familylink-auth:8099`\n\nSi le serveur d'authentification exige une clé API (conteneur v1.7.0+), ajoutez-la à l'URL : `http://192.168.1.100:8099?api_key=<clé>` (clé dans le fichier `data/api_key` du conteneur).",
+				"description": "Aucune source locale n'a été détectée. Saisissez l'URL du serveur Family Link Auth. Si API_KEY est configurée sur le conteneur autonome, saisissez-la séparément ; sinon laissez la clé vide.\n\nExemple d'URL : `http://192.168.1.100:8099`",
 				"data": {
-					"auth_url": "URL du serveur d'authentification"
+					"auth_url": "URL du serveur d'authentification",
+					"api_key": "Clé API"
 				}
 			},
 			"configure": {
@@ -53,6 +54,15 @@
 					"strict_mode": "Le mode strict comble une faille côté Google que beaucoup d'enfants savent exploiter : depuis l'application Family Link ou l'interface Google, un enfant supervisé peut se donner un bonus de temps, déverrouiller un appareil sans temps restant, ou désactiver le coucher et la limite du jour. Avec le mode strict, Home Assistant devient le seul point de contrôle : à chaque mise à jour, il annule ces changements et impose aux réglages Family Link ce que vous avez défini depuis Home Assistant. ATTENTION : tant qu'il est actif, la gestion de Family Link se fait exclusivement depuis Home Assistant, les changements faits dans l'application Family Link sont annulés. Coupez l'interrupteur « Mode strict » de l'enfant pour redonner la main à Google. Le switch Mode strict de chaque enfant reflète cette option : changer l'un met l'autre à jour.",
 					"strict_mode_rules": "Ce que le mode strict fait respecter. Rien n'est activé de force : l'état choisi dans Home Assistant est la référence. Détails dans le README."
 				}
+			},
+			"reconfigure": {
+				"title": "Mettre à jour le serveur d'authentification",
+				"description": "Mettez à jour l'URL et la clé API. La clé existante n'est jamais affichée ; laissez la clé vide pour la conserver.",
+				"data": {
+					"auth_url": "URL du serveur d'authentification",
+					"api_key": "Clé API",
+					"clear_api_key": "Effacer la clé API"
+				}
 			}
 		},
 		"error": {
@@ -60,12 +70,16 @@
 			"invalid_auth": "Aucun cookie trouvé. Veuillez d'abord vous authentifier via le module complémentaire ou le conteneur Family Link Auth.",
 			"url_required": "L'URL est requise",
 			"no_cookies": "Le serveur est accessible mais aucun cookie n'a été trouvé. Veuillez d'abord vous authentifier via l'interface web.",
-			"invalid_api_key": "Le serveur exige une clé API. Ajoutez ?api_key=<clé> à l'URL, où <clé> est la valeur de la variable d'environnement API_KEY définie sur le conteneur d'authentification.",
+			"invalid_api_key": "Le serveur d'authentification a rejeté la clé API.",
+			"api_key_conflict": "Saisissez une nouvelle clé API ou sélectionnez Effacer la clé API, pas les deux.",
+			"api_key_required_for_new_url": "Lorsque vous changez l'URL du serveur, saisissez sa clé API ou sélectionnez Effacer la clé API.",
+			"invalid_url": "Saisissez une URL HTTP ou HTTPS valide, sans identifiants, paramètres de requête ni fragment.",
 			"unknown": "Une erreur inattendue s'est produite"
 		},
 		"abort": {
 			"already_configured": "L'intégration est déjà configurée",
-			"invalid_config": "Configuration invalide"
+			"invalid_config": "Configuration invalide",
+			"reconfigure_successful": "Serveur d'authentification mis à jour"
 		}
 	},
 	"entity": {

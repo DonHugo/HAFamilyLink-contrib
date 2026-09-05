@@ -89,7 +89,7 @@ A broader hardening of the add-on (authenticated browser view, service token in 
 | `GET /api/cookies` | cookie API key | Return the decrypted cookies. |
 | `DELETE /api/cookies` | cookie API key | Delete the stored cookies. |
 
-The key is accepted as an `X-API-Key` header or an `?api_key=` query parameter.
+Current integrations send the key as an `X-API-Key` header. Query-key acceptance remains temporarily for older integration versions.
 
 ## Troubleshooting
 
