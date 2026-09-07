@@ -240,18 +240,22 @@ def parse_daily_limit_schedule(config: Any) -> list[dict[str, Any]]:
 		state_flag = item[2]
 		minutes = item[3]
 
+		# Recognised by shape, not by the CAEQ prefix: accounts with their own
+		# slot ids (issue #157) key these rows differently.
 		if not (
 			isinstance(code, str)
-			and code.startswith(BEDTIME_CODE_PREFIX)
+			and code
 			and _is_int(day)
 			and day in DAY_NAMES
 			and _is_int(state_flag)
+			and state_flag in (1, 2)
 			and _is_int(minutes)
 			and minutes >= 0
 		):
 			continue
 
 		schedules_by_day[day] = {
+			"code": code,
 			"day": day,
 			"day_name": DAY_NAMES[day],
 			# A 0-minute limit is reported as disabled: Google keeps the row
@@ -262,6 +266,104 @@ def parse_daily_limit_schedule(config: Any) -> list[dict[str, Any]]:
 		}
 
 	return [schedules_by_day[day] for day in sorted(schedules_by_day)]
+
+CODE_DAYS = {code: day for day, code in DAY_CODES.items()}
+
+
+def parse_daily_limit_overrides(data: Any) -> dict[int, dict[str, tuple[int, int]]]:
+	"""Per-weekday daily-limit overrides of the timeLimit response.
+
+	Google stores the quota set for a weekday from the app as a type-8
+	override row, ``[uuid, createdMs, 8, device_token, ..., [2, minutes,
+	"CAEQxx"]]``, kept next to the recurring weekly rows (issue #157 capture).
+	Returns ``{day: {device_id: (minutes, created_ms)}}`` with the most recent
+	row per day and device.
+	"""
+	# Slot id -> weekday: the static codes, completed by the live ids of the
+	# weekly rows (accounts with their own slot ids, issue #157).
+	code_days = dict(CODE_DAYS)
+	for row in parse_daily_limit_schedule(data[1] if isinstance(data, list) and len(data) > 1 else data):
+		if isinstance(row.get("code"), str) and _is_int(row.get("day")):
+			code_days[row["code"]] = row["day"]
+	result: dict[int, dict[str, tuple[int, int]]] = {}
+	for item in _walk_lists(data):
+		if len(item) < 5 or item[2] != 8 or not isinstance(item[3], str) or not item[3]:
+			continue
+		device_id = item[3]
+		# The [2, minutes, "CAEQxx"] payload sits at [11] in the request and
+		# after the extra columns of a stored row: take the last such list.
+		payload = next(
+			(p for p in reversed(item[4:]) if isinstance(p, list) and len(p) >= 3 and _is_int(p[1]) and isinstance(p[2], str) and p[2] in code_days),
+			None,
+		)
+		if payload is None:
+			continue
+		minutes, code = payload[1], payload[2]
+		try:
+			created = int(item[1])
+		except (TypeError, ValueError):
+			created = 0
+		day = code_days[code]
+		previous = result.setdefault(day, {}).get(device_id)
+		if previous is None or created >= previous[1]:
+			result[day][device_id] = (int(minutes), created)
+	return result
+
+
+def latest_daily_limit_override(
+	overrides: dict[int, dict[str, tuple[int, int]]],
+) -> tuple[int, int, int] | None:
+	"""The most recent type-8 override across days and devices: (day, minutes, created_ms)."""
+	latest: tuple[int, int, int] | None = None
+	for day, per_device in overrides.items():
+		for _device_id, (minutes, created) in per_device.items():
+			if latest is None or created >= latest[2]:
+				latest = (day, minutes, created)
+	return latest
+
+
+def daily_limit_week(
+	weekly: list[dict[str, Any]],
+	overrides: dict[int, dict[str, tuple[int, int]]],
+	today: int | None = None,
+) -> list[dict[str, Any]]:
+	"""The seven weekday quotas as the Family Link app shows them.
+
+	The app's "weekly limits" screen reads and writes the weekly rows of
+	``data[1]``; they are the value of each weekday. A type-8 override only
+	changes the quota Google applies today, and only while it is the most
+	recent override posted (a later override for another day supersedes it and
+	is itself ignored, live capture 2026-09-03). So the effective minutes are
+	the weekly value, except for ``today`` when the latest override carries
+	today's code.
+	"""
+	by_day = {row["day"]: row for row in weekly if isinstance(row, dict) and _is_int(row.get("day"))}
+	latest = latest_daily_limit_override(overrides)
+	week: list[dict[str, Any]] = []
+	for day in range(1, 8):
+		row = by_day.get(day) or {}
+		weekly_minutes = row.get("minutes")
+		override = None
+		for _device_id, (minutes, created) in (overrides.get(day) or {}).items():
+			if override is None or created >= override[1]:
+				override = (minutes, created)
+		override_minutes = override[0] if override else None
+		applied_override = (
+			today is not None and day == today and latest is not None and latest[0] == day
+		)
+		effective = override_minutes if applied_override and override_minutes is not None else weekly_minutes
+		week.append({
+			"day": day,
+			"day_name": DAY_NAMES[day],
+			"weekly_minutes": weekly_minutes,
+			"override_minutes": override_minutes,
+			"applied_override": bool(applied_override and override_minutes is not None),
+			"effective_minutes": effective,
+			"source": "override" if applied_override and override_minutes is not None else ("weekly" if weekly_minutes is not None else None),
+			"enabled": row.get("enabled"),
+		})
+	return week
+
 
 def find_daily_limit_slot_id(data: Any, day: int) -> str | None:
 	"""Return the live daily-limit slot id for an ISO weekday (issue #157).

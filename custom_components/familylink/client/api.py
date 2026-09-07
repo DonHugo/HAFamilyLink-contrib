@@ -34,6 +34,9 @@ from ..schedules import (
 	WINDOW_SCHOOL_TIME,
 	classify_window_row,
 	DAY_CODES,
+	daily_limit_week,
+	parse_daily_limit_overrides,
+	parse_daily_limit_schedule,
 	find_daily_limit_slot_id,
 	parse_time_string,
 	parse_window_schedule_items,
@@ -1385,9 +1388,14 @@ class FamilyLinkClient:
 
 						# Parse lock state
 						has_lock_override = device_data[0] is not None and isinstance(device_data[0], list)
+						lock_override = None
 						if has_lock_override and len(device_data[0]) > 2:
 							action_code = device_data[0][2]
 							is_locked = (action_code == 1)
+							# 1 = manual lock, 4 = manual unlock (a bypass of the active
+							# restriction until the next scheduled event); kept for strict mode
+							if action_code in (1, 4):
+								lock_override = action_code
 						else:
 							is_locked = False
 						device_lock_states[device_id] = is_locked
@@ -1404,7 +1412,8 @@ class FamilyLinkClient:
 							"bedtime_active": False,
 							"schooltime_active": False,
 							"bonus_minutes": 0,
-							"bonus_override_id": None
+							"bonus_override_id": None,
+							"lock_override": lock_override,
 						}
 						# A device block can carry two daily-limit rows for today: the
 						# effective one near the front (index < 10) and a recurring or
@@ -2193,6 +2202,98 @@ class FamilyLinkClient:
 			enable=False, account_id=account_id, rule_id=rule_id
 		)
 
+	async def _async_set_weekly_policy(self, account_id: str, rule_id: str, enable: bool) -> bool:
+		"""Flip the weekly state of a bedtime / school time policy (timeLimit:update).
+
+		This is the switch shown in the Family Link app. A daily override alone
+		changes today only and leaves that switch as it was.
+		"""
+		try:
+			session = await self._get_session()
+			cookie_header = self._get_cookie_header()
+			payload = json.dumps([
+				None,
+				account_id,
+				[[None, None, None, None], None, None, None, [None, [[rule_id, 2 if enable else 1]]]],
+				None,
+				[1],
+			])
+			async with session.put(
+				self._people_url(account_id, "timeLimit:update"),
+				headers={"Content-Type": "application/json+protobuf", "Cookie": cookie_header},
+				data=payload,
+				params={"$httpMethod": "PUT"},
+			) as response:
+				if response.status != 200:
+					_LOGGER.error(
+						"Failed to update weekly policy %s to %s (HTTP %s): %s",
+						rule_id, enable, response.status, await response.text(),
+					)
+					return False
+			_LOGGER.info(f"Weekly policy {rule_id} set to {'ON' if enable else 'OFF'}")
+			return True
+		except Exception as err:
+			_LOGGER.error(f"Error updating weekly policy {rule_id}: {err}")
+			return False
+
+	async def async_set_weekly_daily_limit(
+		self, day: int, daily_minutes: int, account_id: str | None = None
+	) -> bool:
+		"""Set the weekly screen time quota of one weekday (the app's "weekly schedule" screen).
+
+		Captured on the web app (2026-09-03): PUT timeLimit:update with
+		``[null, childId, [null, [[2, null, null, [[slot, minutes]]]]], null, [1]]``.
+		The daily-limit block sits at index 1 of the timeLimit object, only the
+		modified day is sent and Google merges it into the weekly rows of
+		``data[1]``. The slot is the day's weekly slot id (issue #157 accounts
+		have their own). This changes the recurring quota; the minutes applied
+		today still follow today's override while one is in force.
+		"""
+		if not (isinstance(day, int) and 1 <= day <= 7):
+			_LOGGER.error(f"Invalid weekday {day}: expected 1 (Monday) to 7 (Sunday)")
+			return False
+		if not (isinstance(daily_minutes, int) and 0 <= daily_minutes <= 1440):
+			_LOGGER.error(f"Invalid daily limit {daily_minutes}: expected 0 to 1440 minutes")
+			return False
+		if not account_id:
+			account_id = await self.async_get_supervised_child_id()
+		account_id = self._validate_id(account_id, "account_id")
+		try:
+			session = await self._get_session()
+			cookie_header = self._get_cookie_header()
+			slot = await self._async_get_daily_limit_slot_id(account_id, day, session, cookie_header)
+			if slot is None:
+				slot = self._DAY_CODES[day]
+				_LOGGER.warning(
+					f"Could not resolve the live daily-limit slot for account {account_id}, "
+					f"day {day}; falling back to {slot}"
+				)
+			payload = json.dumps([
+				None,
+				account_id,
+				[None, [[2, None, None, [[slot, int(daily_minutes)]]]]],
+				None,
+				[1],
+			])
+			async with session.put(
+				self._people_url(account_id, "timeLimit:update"),
+				headers={"Content-Type": "application/json+protobuf", "Cookie": cookie_header},
+				data=payload,
+				params={"$httpMethod": "PUT"},
+			) as response:
+				if response.status != 200:
+					_LOGGER.error(
+						"Failed to set the weekly daily limit for day %s to %s min (HTTP %s): %s",
+						day, daily_minutes, response.status, await response.text(),
+					)
+					return False
+			_LOGGER.info(f"Weekly daily limit for day {day} set to {daily_minutes} min (slot {slot})")
+			self._weekly_slot_cache.pop(account_id, None)
+			return True
+		except Exception as err:
+			_LOGGER.error(f"Error setting the weekly daily limit for day {day}: {err}")
+			return False
+
 	async def _async_apply_school_time_today(
 		self,
 		enable: bool,
@@ -2222,6 +2323,11 @@ class FamilyLinkClient:
 
 		# Google uses ISO weekday numbering (1=Monday … 7=Sunday) in the user's
 		# local time, since Family Link schedules are per-day.
+		# Flip the weekly policy first, as the app does for bedtime: the daily
+		# override below only covers today, the weekly switch is what the app
+		# shows and what applies from tomorrow on.
+		await self._async_set_weekly_policy(account_id, rule_id, enable)
+
 		now_local = dt_util.now()
 		weekday = now_local.isoweekday()
 		start = [now_local.hour, now_local.minute]
@@ -2551,7 +2657,8 @@ class FamilyLinkClient:
 		self,
 		daily_minutes: int,
 		device_id: str,
-		account_id: str | None = None
+		account_id: str | None = None,
+		day: int | None = None,
 	) -> bool:
 		"""Set daily time limit duration for a device.
 
@@ -2573,12 +2680,24 @@ class FamilyLinkClient:
 			session = await self._get_session()
 			cookie_header = self._get_cookie_header()
 
-			# The daily-limit override references today's weekly slot. That
-			# slot id is the static CAEQxx code on most accounts but not on
-			# all of them: with an unknown id Google still answers HTTP 200
-			# and the override stays inert (issue #157, same class of failure
-			# as the bedtime slots in #135). Resolve the live id first.
+			# Weekday (1=Monday, 7=Sunday). Google only applies the most recent
+			# type-8 override, and only when it carries today's code: an override
+			# posted for another weekday is inert AND cancels today's (live capture
+			# 2026-09-03). The app's weekly screen writes the weekly rows instead
+			# (form not captured yet), so another day is refused here rather than
+			# silently breaking today's quota.
 			current_day = dt_util.now().isoweekday()
+			if isinstance(day, int) and day != current_day:
+				_LOGGER.error(
+					f"Cannot set the daily limit for weekday {day}: Google only applies a quota "
+					"override for the current day. Change other weekdays in the Family Link app for now."
+				)
+				return False
+			# The override references today's weekly slot. That slot id is the
+			# static CAEQxx code on most accounts but not on all of them: with an
+			# unknown id Google still answers HTTP 200 and the override stays
+			# inert (issue #157, same class of failure as the bedtime slots in
+			# #135). Resolve the live id first.
 			day_code = await self._async_get_daily_limit_slot_id(
 				account_id, current_day, session, cookie_header
 			)
@@ -3202,6 +3321,13 @@ class FamilyLinkClient:
 				#
 				# data[1] is the daily-limit-MINUTES config, it does NOT contain
 				# window rows. Row shapes live in schedules.py.
+				# Weekly daily-limit quotas (data[1]) merged with the per-weekday
+				# overrides of the override block, as the app's weekly screen shows.
+				weekly_limits = parse_daily_limit_schedule(data[1]) if isinstance(data, list) and len(data) > 1 else []
+				daily_limit_week_rows = daily_limit_week(
+					weekly_limits, parse_daily_limit_overrides(data), dt_util.now().isoweekday()
+				)
+
 				schedule_bedtime_id = bedtime_rule_id or self._BEDTIME_POLICY_ID
 				schedule_schooltime_id = schooltime_rule_id or self._SCHOOLTIME_POLICY_ID
 				if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
@@ -3347,6 +3473,7 @@ class FamilyLinkClient:
 					"school_time_enabled_today": school_time_enabled_today,
 					"bedtime_schedule": bedtime_schedule,
 					"school_time_schedule": school_time_schedule,
+					"daily_limit_week": daily_limit_week_rows,
 					"bedtime_rule_id": bedtime_rule_id,
 					"schooltime_rule_id": schooltime_rule_id
 				}
