@@ -1,13 +1,13 @@
 """Browser-based authentication manager using Playwright."""
 import asyncio
-import logging
 import time
 import uuid
 from typing import Dict, Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError
+from app.privacy import get_privacy_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_privacy_logger(__name__)
 
 
 class BrowserAuthManager:
@@ -292,7 +292,9 @@ class BrowserAuthManager:
 
         except Exception as e:
             session['status'] = 'error'
-            session['error'] = str(e)
+            # This field is returned by /api/auth/status, so arbitrary browser
+            # exception text must not cross the UI/API boundary.
+            session['error'] = 'Authentication failed'
             _LOGGER.error(f"Authentication error for session {session_id}: {e}")
             await self._cleanup_session(session_id)
 

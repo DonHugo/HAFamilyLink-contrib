@@ -5,7 +5,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import logging
 import re
 import time
 from datetime import datetime, timedelta
@@ -32,6 +31,7 @@ from ..exceptions import (
 	NetworkError,
 	SessionExpiredError,
 )
+from ..privacy import get_privacy_logger
 from ..schedules import (
 	WINDOW_BEDTIME,
 	WINDOW_SCHOOL_TIME,
@@ -45,7 +45,7 @@ from ..schedules import (
 	parse_window_schedule_items,
 )
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 
 class FamilyLinkClient:

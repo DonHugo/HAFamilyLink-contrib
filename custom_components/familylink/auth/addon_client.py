@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -14,8 +13,9 @@ from yarl import URL
 from homeassistant.core import HomeAssistant
 
 from ..const import AUTH_SOURCE_MANAGED, AUTH_SOURCE_MANUAL
+from ..privacy import get_privacy_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_privacy_logger(__name__)
 
 # Addon slug suffix (the hash prefix is derived from the repository URL)
 _ADDON_SLUG_SUFFIX = "familylink-playwright"

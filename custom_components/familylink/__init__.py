@@ -1,14 +1,13 @@
 """The Google Family Link integration."""
 from __future__ import annotations
 
-import logging
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 from homeassistant.util import dt as dt_util
@@ -45,11 +44,27 @@ from .const import (
 )
 from .coordinator import FamilyLinkDataUpdateCoordinator
 from .exceptions import FamilyLinkException
+from .entity import async_error_boundary
+from .privacy import get_privacy_logger
 from .schedules import parse_time_string
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.DEVICE_TRACKER, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH, Platform.SELECT, Platform.TIME]
+
+_SAFE_SERVICE_ERRORS = (
+	{
+		(FamilyLinkException, "Family Link client is not connected. Please re-authenticate via the add-on."),
+		(ValueError, "device_id is required. Either select an entity or provide device_id manually."),
+		(ValueError, "device_id or child_id is required. Either select an entity or provide one of them manually."),
+	}
+)
+
+
+_privacy_safe_handler = async_error_boundary(
+	"The Family Link service action failed",
+	safe_errors=_SAFE_SERVICE_ERRORS,
+)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -259,10 +274,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 	except FamilyLinkException as err:
 		_LOGGER.debug("Failed to set up Family Link, will retry: %s", err)
-		raise ConfigEntryNotReady(f"Failed to connect: {err}") from err
+		raise ConfigEntryNotReady("Unable to connect to Family Link") from None
+	except Unauthorized:
+		raise
 	except Exception as err:
 		_LOGGER.debug("Unexpected error setting up Family Link, will retry: %s", err)
-		raise ConfigEntryNotReady(f"Unexpected error: {err}") from err
+		raise ConfigEntryNotReady("Unable to set up Family Link") from None
 
 
 async def async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -326,7 +343,6 @@ def extract_ids_from_entity(hass: HomeAssistant, entity_id: str | None, require_
 
 async def async_setup_services(hass: HomeAssistant, coordinator: FamilyLinkDataUpdateCoordinator) -> None:
 	"""Set up services for Family Link."""
-
 	def _require_client():
 		"""Raise if the API client is not available."""
 		if coordinator.client is None:
@@ -903,35 +919,35 @@ async def async_setup_services(hass: HomeAssistant, coordinator: FamilyLinkDataU
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_BLOCK_DEVICE_FOR_SCHOOL,
-		handle_block_device_for_school,
+		_privacy_safe_handler(handle_block_device_for_school),
 		schema=SCHEMA_BLOCK_DEVICE_FOR_SCHOOL,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_UNBLOCK_ALL_APPS,
-		handle_unblock_all_apps,
+		_privacy_safe_handler(handle_unblock_all_apps),
 		schema=SCHEMA_UNBLOCK_ALL_APPS,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_BLOCK_APP,
-		handle_block_app,
+		_privacy_safe_handler(handle_block_app),
 		schema=SCHEMA_BLOCK_APP,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_UNBLOCK_APP,
-		handle_unblock_app,
+		_privacy_safe_handler(handle_unblock_app),
 		schema=SCHEMA_UNBLOCK_APP,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_SET_APP_DAILY_LIMIT,
-		handle_set_app_daily_limit,
+		_privacy_safe_handler(handle_set_app_daily_limit),
 		schema=SCHEMA_SET_APP_DAILY_LIMIT,
 	)
 
@@ -994,84 +1010,84 @@ async def async_setup_services(hass: HomeAssistant, coordinator: FamilyLinkDataU
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_ADD_TIME_BONUS,
-		handle_add_time_bonus,
+		_privacy_safe_handler(handle_add_time_bonus),
 		schema=SCHEMA_ADD_TIME_BONUS,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_ENABLE_BEDTIME,
-		handle_enable_bedtime,
+		_privacy_safe_handler(handle_enable_bedtime),
 		schema=SCHEMA_ENABLE_BEDTIME,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_DISABLE_BEDTIME,
-		handle_disable_bedtime,
+		_privacy_safe_handler(handle_disable_bedtime),
 		schema=SCHEMA_DISABLE_BEDTIME,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_ENABLE_SCHOOL_TIME,
-		handle_enable_school_time,
+		_privacy_safe_handler(handle_enable_school_time),
 		schema=SCHEMA_ENABLE_SCHOOL_TIME,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_DISABLE_SCHOOL_TIME,
-		handle_disable_school_time,
+		_privacy_safe_handler(handle_disable_school_time),
 		schema=SCHEMA_DISABLE_SCHOOL_TIME,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_ENABLE_DAILY_LIMIT,
-		handle_enable_daily_limit,
+		_privacy_safe_handler(handle_enable_daily_limit),
 		schema=SCHEMA_ENABLE_DAILY_LIMIT,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_DISABLE_DAILY_LIMIT,
-		handle_disable_daily_limit,
+		_privacy_safe_handler(handle_disable_daily_limit),
 		schema=SCHEMA_DISABLE_DAILY_LIMIT,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_SET_DAILY_LIMIT,
-		handle_set_daily_limit,
+		_privacy_safe_handler(handle_set_daily_limit),
 		schema=SCHEMA_SET_DAILY_LIMIT,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_SET_BEDTIME,
-		handle_set_bedtime,
+		_privacy_safe_handler(handle_set_bedtime),
 		schema=SCHEMA_SET_BEDTIME,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_REFRESH_LOCATION,
-		handle_refresh_location,
+		_privacy_safe_handler(handle_refresh_location),
 		schema=SCHEMA_REFRESH_LOCATION,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_RING_DEVICE,
-		handle_ring_device,
+		_privacy_safe_handler(handle_ring_device),
 		schema=SCHEMA_RING_DEVICE,
 	)
 
 	hass.services.async_register(
 		DOMAIN,
 		SERVICE_SET_UPDATE_INTERVAL,
-		handle_set_update_interval,
+		_privacy_safe_handler(handle_set_update_interval),
 		schema=SCHEMA_SET_UPDATE_INTERVAL,
 	)
 

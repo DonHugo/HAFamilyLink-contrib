@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -22,9 +21,11 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_ENABLE_LOCATION_TRACKING, DOMAIN, LOGGER_NAME
 from .coordinator import FamilyLinkDataUpdateCoordinator
 from .devices import ensure_child_device, via_child
+from .entity import FamilyLinkPrivacyMixin
+from .privacy import get_privacy_logger
 from .schedules import WINDOW_BEDTIME, describe_time_until, next_scheduled_window
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 
 class ChildDataMixin:
@@ -121,7 +122,7 @@ async def async_setup_entry(
     async_add_entities(entities, update_before_add=True)
 
 
-class ScreenTimeRemainingSensor(CoordinatorEntity, SensorEntity):
+class ScreenTimeRemainingSensor(FamilyLinkPrivacyMixin, CoordinatorEntity, SensorEntity):
     """Sensor showing remaining screen time for a device."""
 
     def __init__(
@@ -229,7 +230,7 @@ class ScreenTimeRemainingSensor(CoordinatorEntity, SensorEntity):
         return attributes
 
 
-class NextRestrictionSensor(CoordinatorEntity, SensorEntity):
+class NextRestrictionSensor(FamilyLinkPrivacyMixin, CoordinatorEntity, SensorEntity):
     """Sensor showing the next upcoming time restriction."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -410,7 +411,7 @@ class NextRestrictionSensor(CoordinatorEntity, SensorEntity):
         return attributes
 
 
-class FamilyLinkScreenTimeSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkScreenTimeSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for daily screen time in minutes."""
 
 	_attr_device_class = SensorDeviceClass.DURATION
@@ -517,7 +518,7 @@ class FamilyLinkScreenTimeSensor(ChildDataMixin, CoordinatorEntity, SensorEntity
 		return attributes
 
 
-class FamilyLinkScreenTimeFormattedSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkScreenTimeFormattedSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for daily screen time in formatted HH:MM:SS."""
 
 	_attr_icon = "mdi:clock-time-eight-outline"
@@ -581,7 +582,7 @@ class FamilyLinkScreenTimeFormattedSensor(ChildDataMixin, CoordinatorEntity, Sen
 		}
 
 
-class FamilyLinkAppCountSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkAppCountSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for total number of installed apps."""
 
 	_attr_icon = "mdi:apps"
@@ -664,7 +665,7 @@ def _truncate_app_list(apps: list[dict], base_attrs: dict) -> tuple[list[dict], 
 	return apps[:lo], True
 
 
-class FamilyLinkBlockedAppsSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkBlockedAppsSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for blocked/hidden apps."""
 
 	_attr_icon = "mdi:block-helper"
@@ -729,7 +730,7 @@ class FamilyLinkBlockedAppsSensor(ChildDataMixin, CoordinatorEntity, SensorEntit
 		return base_attrs
 
 
-class FamilyLinkAppsWithLimitsSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkAppsWithLimitsSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for apps with time limits."""
 
 	_attr_icon = "mdi:timer-sand"
@@ -797,7 +798,7 @@ class FamilyLinkAppsWithLimitsSensor(ChildDataMixin, CoordinatorEntity, SensorEn
 		return base_attrs
 
 
-class FamilyLinkAppsWithoutLimitsSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkAppsWithoutLimitsSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for apps that are neither blocked nor time-limited."""
 
 	_attr_icon = "mdi:lock-open-outline"
@@ -869,7 +870,7 @@ class FamilyLinkAppsWithoutLimitsSensor(ChildDataMixin, CoordinatorEntity, Senso
 		return base_attrs
 
 
-class FamilyLinkAlwaysAllowedAppsSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkAlwaysAllowedAppsSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for always-allowed apps (bypass all device limits)."""
 
 	_attr_icon = "mdi:shield-star-outline"
@@ -936,7 +937,7 @@ class FamilyLinkAlwaysAllowedAppsSensor(ChildDataMixin, CoordinatorEntity, Senso
 		return base_attrs
 
 
-class FamilyLinkTopAppSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkTopAppSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for individual top app usage."""
 
 	_attr_device_class = SensorDeviceClass.DURATION
@@ -1043,7 +1044,7 @@ class FamilyLinkTopAppSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
 		}
 
 
-class FamilyLinkDeviceCountSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkDeviceCountSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for number of devices."""
 
 	_attr_icon = "mdi:devices"
@@ -1103,7 +1104,7 @@ class FamilyLinkDeviceCountSensor(ChildDataMixin, CoordinatorEntity, SensorEntit
 		}
 
 
-class FamilyLinkChildInfoSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkChildInfoSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for supervised child information."""
 
 	_attr_icon = "mdi:account-child"
@@ -1177,7 +1178,7 @@ class FamilyLinkChildInfoSensor(ChildDataMixin, CoordinatorEntity, SensorEntity)
 		return attrs
 
 
-class DailyLimitDeviceSensor(CoordinatorEntity, SensorEntity):
+class DailyLimitDeviceSensor(FamilyLinkPrivacyMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor showing daily limit quota for a specific device."""
 
 	def __init__(
@@ -1259,7 +1260,7 @@ class DailyLimitDeviceSensor(CoordinatorEntity, SensorEntity):
 		return attributes
 
 
-class ActiveBonusSensor(CoordinatorEntity, SensorEntity):
+class ActiveBonusSensor(FamilyLinkPrivacyMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor showing active time bonus for a device."""
 
 	def __init__(
@@ -1338,7 +1339,7 @@ class ActiveBonusSensor(CoordinatorEntity, SensorEntity):
 		return attributes
 
 
-class FamilyLinkBatteryLevelSensor(ChildDataMixin, CoordinatorEntity, SensorEntity):
+class FamilyLinkBatteryLevelSensor(FamilyLinkPrivacyMixin, ChildDataMixin, CoordinatorEntity, SensorEntity):
 	"""Sensor for device battery level (from location data)."""
 
 	_attr_device_class = SensorDeviceClass.BATTERY

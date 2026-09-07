@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import logging
 import time
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -32,6 +32,7 @@ from .const import (
 	LOGGER_NAME,
 )
 from .exceptions import FamilyLinkException, SessionExpiredError
+from .privacy import get_privacy_logger
 from .strict_mode import (
 	ACTION_CANCEL_BONUS,
 	ACTION_DISABLE_BEDTIME,
@@ -50,7 +51,7 @@ from .strict_mode import (
 	snapshot_values,
 )
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 
 def _gate_windows_on_policy_state(
@@ -154,7 +155,7 @@ class FamilyLinkDataUpdateCoordinator(DataUpdateCoordinator):
 			if self._is_retrying_auth:
 				_LOGGER.error("Session still expired after refresh - cookies are invalid")
 				await self._create_auth_notification()
-				raise UpdateFailed("Session expired, please re-authenticate via Family Link Auth add-on") from err
+				raise UpdateFailed("Session expired, please re-authenticate via Family Link Auth add-on") from None
 
 			_LOGGER.warning("Session expired, attempting to refresh authentication")
 			self._is_retrying_auth = True
@@ -174,26 +175,31 @@ class FamilyLinkDataUpdateCoordinator(DataUpdateCoordinator):
 				# If it still fails after refresh, cookies are truly invalid
 				_LOGGER.error("Session still expired after refresh - please re-authenticate via add-on")
 				await self._create_auth_notification()
-				raise UpdateFailed("Session expired, please re-authenticate via Family Link Auth add-on") from err
+				raise UpdateFailed("Session expired, please re-authenticate via Family Link Auth add-on") from None
+			except Unauthorized:
+				raise
 			except Exception as retry_err:
 				_LOGGER.error(f"Retry after auth refresh failed: {retry_err}")
-				raise UpdateFailed(f"Failed after auth refresh: {retry_err}") from retry_err
+				raise UpdateFailed("Family Link authentication refresh failed") from None
 			finally:
 				self._is_retrying_auth = False  # Always reset flag
+
+		except Unauthorized:
+			raise
 
 		except FamilyLinkException as err:
 			_LOGGER.error("Error fetching Family Link data: %s", err)
 			if self._last_known_data is not None:
 				_LOGGER.info("Returning last known data due to FamilyLinkException: %s", err)
 				return self._last_known_data
-			raise UpdateFailed(f"Error communicating with Family Link: {err}") from err
+			raise UpdateFailed("Unable to communicate with Family Link") from None
 
 		except Exception as err:
 			_LOGGER.exception("Unexpected error fetching Family Link data")
 			if self._last_known_data is not None:
 				_LOGGER.info("Returning last known data due to unexpected error: %s", err)
 				return self._last_known_data
-			raise UpdateFailed(f"Unexpected error: {err}") from err
+			raise UpdateFailed("Family Link update failed") from None
 
 	async def _async_fetch_data(self) -> dict[str, Any]:
 		"""Perform the actual data fetch from Family Link API."""

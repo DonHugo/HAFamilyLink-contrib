@@ -1,0 +1,4 @@
+-r familylink-playwright/requirements.txt
+playwright==1.62.0
+pytest==9.0.3
+pytest-asyncio==1.4.0

@@ -14,6 +14,7 @@ import uvicorn
 from app.auth.browser import BrowserAuthManager
 from app.storage.file_storage import SharedStorage
 from app.config import get_config
+from app.privacy import get_privacy_logger
 from app.translations import get_translations
 
 # Configure logging
@@ -24,7 +25,7 @@ logging.basicConfig(
     stream=sys.stdout
 )
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_privacy_logger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
@@ -55,8 +56,23 @@ _API_KEY = os.getenv("API_KEY", "")
 # shared volume, so an auto-generated key would break the integration.
 _ADDON_MODE = bool(os.getenv("SUPERVISOR_TOKEN") or os.getenv("ADDON_MODE"))
 
+
+class AuthServiceStartupError(RuntimeError):
+    """Sanitized startup failure safe for framework logging."""
+
+
+class AuthServiceShutdownError(RuntimeError):
+    """Sanitized shutdown failure safe for framework logging."""
+
+
 # Global instances
-storage = SharedStorage(config.share_dir)
+try:
+    storage = SharedStorage(config.share_dir)
+except Exception as err:
+    _LOGGER.error(f"Failed to initialize authentication storage: {err}")
+    raise AuthServiceStartupError(
+        "Authentication service storage initialization failed"
+    ) from None
 browser_manager = None
 
 
@@ -88,8 +104,13 @@ def _load_or_create_cookie_api_key() -> "str | None":
     except OSError:
         pass
     key = secrets.token_urlsafe(32)
-    key_path.write_text(key)
-    os.chmod(key_path, 0o600)
+    try:
+        key_path.write_text(key)
+        os.chmod(key_path, 0o600)
+    except OSError:
+        raise AuthServiceStartupError(
+            "Authentication service credential setup failed"
+        ) from None
     _LOGGER.info(f"Generated cookie API key at {key_path}")
     return key
 
@@ -136,7 +157,7 @@ async def startup_event():
         _LOGGER.info("Service started successfully")
     except Exception as e:
         _LOGGER.error(f"Failed to start service: {e}")
-        raise
+        raise AuthServiceStartupError("Authentication service startup failed") from None
 
 
 @app.on_event("shutdown")
@@ -144,7 +165,13 @@ async def shutdown_event():
     """Cleanup on shutdown."""
     _LOGGER.info("Shutting down Family Link Auth Service")
     if browser_manager:
-        await browser_manager.cleanup()
+        try:
+            await browser_manager.cleanup()
+        except Exception:
+            _LOGGER.error("Authentication service shutdown failed")
+            raise AuthServiceShutdownError(
+                "Authentication service shutdown failed"
+            ) from None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -519,7 +546,9 @@ async def start_authentication(_: None = Depends(_verify_api_key)):
         }
     except Exception as e:
         _LOGGER.error(f"Failed to start auth: {e}")
-        raise HTTPException(status_code=500, detail="Authentication start failed")
+        raise HTTPException(
+            status_code=500, detail="Authentication start failed"
+        ) from None
 
 
 @app.get("/api/auth/status/{session_id}")
@@ -527,15 +556,30 @@ async def check_auth_status(session_id: str, _: None = Depends(_verify_api_key))
     """Check authentication status."""
     if browser_manager is None:
         raise HTTPException(status_code=503, detail="Service not ready")
-    status = await browser_manager.get_session_status(session_id)
-    return status
+    try:
+        return await browser_manager.get_session_status(session_id)
+    except HTTPException:
+        raise
+    except Exception:
+        _LOGGER.error("Authentication status check failed")
+        raise HTTPException(
+            status_code=500, detail="Authentication status check failed"
+        ) from None
 
 
 @app.get("/api/cookies/check")
 async def check_cookies():
     """Check if cookies exist."""
-    exists = await storage.check_exists()
-    return {"exists": exists}
+    try:
+        exists = await storage.check_exists()
+        return {"exists": exists}
+    except HTTPException:
+        raise
+    except Exception:
+        _LOGGER.error("Cookie status check failed")
+        raise HTTPException(
+            status_code=500, detail="Cookie status check failed"
+        ) from None
 
 
 @app.get("/api/cookies")
@@ -549,10 +593,10 @@ async def get_cookies(_: None = Depends(_verify_cookie_api_key)):
             "count": len(cookies)
         }
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No cookies found")
+        raise HTTPException(status_code=404, detail="No cookies found") from None
     except Exception as e:
         _LOGGER.error(f"Failed to load cookies: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load cookies")
+        raise HTTPException(status_code=500, detail="Failed to load cookies") from None
 
 
 @app.delete("/api/cookies")
@@ -563,7 +607,7 @@ async def delete_cookies(_: None = Depends(_verify_cookie_api_key)):
         return {"status": "success", "message": "Cookies deleted"}
     except Exception as e:
         _LOGGER.error(f"Failed to delete cookies: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete cookies")
+        raise HTTPException(status_code=500, detail="Failed to delete cookies") from None
 
 
 if __name__ == "__main__":
@@ -571,5 +615,6 @@ if __name__ == "__main__":
         app,
         host=config.host,
         port=config.port,
-        log_level=config.log_level.lower()
+        log_level=config.log_level.lower(),
+        access_log=False,
     )

@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from cryptography.fernet import Fernet, InvalidToken
-import logging
+from app.privacy import get_privacy_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_privacy_logger(__name__)
 
 
 class SharedStorage:
@@ -24,7 +24,6 @@ class SharedStorage:
         # — HA add-ons share /share via mapped volume
         self.share_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.share_dir, 0o700)
-
         self._encryption_key = self._get_encryption_key()
 
     def _get_encryption_key(self) -> bytes:

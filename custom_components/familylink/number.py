@@ -8,7 +8,6 @@ today's override on every device so the change applies at once.
 """
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -23,9 +22,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, LOGGER_NAME
 from .coordinator import FamilyLinkDataUpdateCoordinator
 from .devices import ensure_child_device
+from .entity import FamilyLinkPrivacyMixin, privacy_safe_entity_action
+from .privacy import get_privacy_logger
 from .schedules import DAY_NAMES
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 
 async def async_setup_entry(
@@ -49,7 +50,7 @@ async def async_setup_entry(
 	async_add_entities(entities)
 
 
-class FamilyLinkDailyLimitNumber(CoordinatorEntity, NumberEntity):
+class FamilyLinkDailyLimitNumber(FamilyLinkPrivacyMixin, CoordinatorEntity, NumberEntity):
 	"""Daily screen time quota of one weekday, in minutes."""
 
 	# The device (the child's hub) gives the prefix, the entity name is the weekday only:
@@ -125,6 +126,7 @@ class FamilyLinkDailyLimitNumber(CoordinatorEntity, NumberEntity):
 			"enabled": entry.get("enabled"),
 		}
 
+	@privacy_safe_entity_action
 	async def async_set_native_value(self, value: float) -> None:
 		"""Write the weekly quota of this weekday; for today, also post today's override.
 

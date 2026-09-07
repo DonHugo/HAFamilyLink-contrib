@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 - **Authentication server credentials are no longer stored in URLs.** Manual setup now uses a separate masked API-key field; version-1 entries are migrated to a query-free URL and unique ID, runtime requests send only `X-API-Key`, and config-entry diagnostics redact the credential. The API-key field remains optional for standalone auth containers that do not set `API_KEY`; existing keys can be rotated or cleared through Reconfigure. This change raises the minimum Home Assistant version to 2024.4, when native reconfigure flows were introduced.
+- **Logs and new Recorder rows minimize Family Link data.** Integration and auth-service logs now retain only allow-listed operation/status metadata and safe HTTP status codes, Uvicorn access logging is disabled, and every entity with dynamic attributes marks those attributes unrecorded. Primary entity states and live attributes are unchanged; existing history is not purged automatically, and non-Recorder exporters require separate configuration.
 
 ---
 

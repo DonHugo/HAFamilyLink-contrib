@@ -1,7 +1,6 @@
 """Binary sensor platform for Google Family Link integration."""
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Any
 
@@ -21,8 +20,10 @@ from .const import (
 )
 from .coordinator import FamilyLinkDataUpdateCoordinator
 from .devices import ensure_child_device, via_child
+from .entity import FamilyLinkPrivacyMixin
+from .privacy import get_privacy_logger
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = get_privacy_logger(LOGGER_NAME)
 
 
 async def async_setup_entry(
@@ -100,7 +101,7 @@ async def async_setup_entry(
 	async_add_entities(entities, update_before_add=True)
 
 
-class DeviceTimeBinarySensor(CoordinatorEntity, BinarySensorEntity):
+class DeviceTimeBinarySensor(FamilyLinkPrivacyMixin, CoordinatorEntity, BinarySensorEntity):
 	"""Base class for device time binary sensors."""
 
 	def __init__(
