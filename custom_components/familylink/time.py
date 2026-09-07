@@ -55,6 +55,7 @@ async def async_setup_entry(
 class FamilyLinkBedtimeTime(CoordinatorEntity, TimeEntity):
 	"""Start or end of the bedtime of one weekday."""
 
+	_attr_has_entity_name = True
 	_attr_entity_category = EntityCategory.CONFIG
 
 	def __init__(
@@ -71,8 +72,8 @@ class FamilyLinkBedtimeTime(CoordinatorEntity, TimeEntity):
 		self._child_name = child_name
 		self._day = day
 		self._bound = bound
-		label = "Start" if bound == BOUND_START else "End"
-		self._attr_name = f"{child_name} {DAY_NAMES[day]} Bedtime {label}"
+		label = "start" if bound == BOUND_START else "end"
+		self._attr_name = f"{DAY_NAMES[day]} bedtime {label}"
 		self._attr_unique_id = f"{DOMAIN}_{child_id}_bedtime_{day}_{bound}"
 		self._attr_icon = "mdi:weather-night" if bound == BOUND_START else "mdi:weather-sunny"
 

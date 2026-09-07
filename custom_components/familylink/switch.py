@@ -637,7 +637,8 @@ class FamilyLinkStrictModeSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity)
 		super().__init__(coordinator)
 		self._child_id = child_id
 		self._child_name = child_name
-		self._attr_name = f"{child_name} Strict Mode"
+		self._attr_has_entity_name = True
+		self._attr_name = "Strict mode"
 		self._attr_unique_id = f"{DOMAIN}_{child_id}_strict_mode"
 		self._attr_entity_category = EntityCategory.CONFIG
 

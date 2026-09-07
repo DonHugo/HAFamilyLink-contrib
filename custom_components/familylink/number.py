@@ -52,6 +52,9 @@ async def async_setup_entry(
 class FamilyLinkDailyLimitNumber(CoordinatorEntity, NumberEntity):
 	"""Daily screen time quota of one weekday, in minutes."""
 
+	# The device (the child's hub) gives the prefix, the entity name is the weekday only:
+	# number.<child>_<weekday>_limit rather than the child name twice.
+	_attr_has_entity_name = True
 	_attr_native_min_value = 0
 	_attr_native_max_value = 1440
 	_attr_native_step = 5
@@ -72,7 +75,7 @@ class FamilyLinkDailyLimitNumber(CoordinatorEntity, NumberEntity):
 		self._child_id = child_id
 		self._child_name = child_name
 		self._day = day
-		self._attr_name = f"{child_name} {DAY_NAMES[day]} Limit"
+		self._attr_name = f"{DAY_NAMES[day]} limit"
 		self._attr_unique_id = f"{DOMAIN}_{child_id}_daily_limit_{day}"
 
 	@property
