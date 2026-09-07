@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- **Authentication server credentials are no longer stored in URLs.** Manual setup now uses a separate masked API-key field; version-1 entries are migrated to a query-free URL and unique ID, runtime requests send only `X-API-Key`, and config-entry diagnostics redact the credential. The API-key field remains optional for standalone auth containers that do not set `API_KEY`; existing keys can be rotated or cleared through Reconfigure. This change raises the minimum Home Assistant version to 2024.4, when native reconfigure flows were introduced.
+
 ---
 
 ## [2.0.0-rc1] - 2026-09-07
