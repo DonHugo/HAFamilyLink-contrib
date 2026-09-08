@@ -267,12 +267,7 @@ class BrowserAuthManager:
             _LOGGER.info(f"Extracted {len(google_cookies)} Google cookies")
 
             # Save to shared storage (use injected instance to avoid config mismatch)
-            if self._storage:
-                await self._storage.save_cookies(google_cookies)
-            else:
-                from app.storage.file_storage import SharedStorage
-                storage = SharedStorage()
-                await storage.save_cookies(google_cookies)
+            await self._save_cookies(google_cookies)
 
             # Update session
             session['status'] = 'completed'
@@ -297,6 +292,17 @@ class BrowserAuthManager:
             session['error'] = 'Authentication failed'
             _LOGGER.error(f"Authentication error for session {session_id}: {e}")
             await self._cleanup_session(session_id)
+
+    async def _save_cookies(self, cookies: list[dict]) -> None:
+        """Persist cookies, closing fallback storage on every exit path."""
+        if self._storage:
+            await self._storage.save_cookies(cookies)
+            return
+
+        from app.storage.file_storage import SharedStorage
+
+        with SharedStorage() as storage:
+            await storage.save_cookies(cookies)
 
     def _on_monitor_done(self, session_id: str, task: asyncio.Task):
         """Handle monitor task completion, log unhandled errors."""

@@ -333,13 +333,76 @@ async def test_shutdown_boundary_sanitizes_framework_exception(
     manager.cleanup = fail_cleanup
     monkeypatch.setattr(main, "browser_manager", manager)
 
-    with caplog.at_level(logging.DEBUG):
-        with pytest.raises(main.AuthServiceShutdownError) as raised:
-            await main.shutdown_event()
+    with caplog.at_level(logging.DEBUG), pytest.raises(
+        main.AuthServiceShutdownError
+    ) as raised:
+        await main.shutdown_event()
 
     assert str(raised.value) == "Authentication service shutdown failed"
     assert raised.value.__suppress_context__
     assert "shutdown-canary" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("browser_fails", [False, True])
+async def test_shutdown_storage_failure_is_stable_and_sanitized(
+    caplog, monkeypatch, tmp_path, browser_fails: bool
+) -> None:
+    """Storage-only and dual failures expose one stable shutdown error."""
+    main = _import_main(monkeypatch, tmp_path)
+    calls: list[str] = []
+    browser_canary = "browser-shutdown-secret"
+    storage_canary = "storage-shutdown-secret"
+
+    class Manager:
+        async def cleanup(self) -> None:
+            calls.append("browser")
+            if browser_fails:
+                raise RuntimeError(browser_canary)
+
+    class Storage:
+        def close(self) -> None:
+            calls.append("storage")
+            raise OSError(storage_canary)
+
+    monkeypatch.setattr(main, "browser_manager", Manager())
+    monkeypatch.setattr(main, "storage", Storage())
+
+    with caplog.at_level(logging.DEBUG), pytest.raises(
+        main.AuthServiceShutdownError
+    ) as raised:
+        await main.shutdown_event()
+
+    assert calls == ["browser", "storage"]
+    assert str(raised.value) == "Authentication service shutdown failed"
+    assert raised.value.__suppress_context__
+    assert browser_canary not in caplog.text
+    assert storage_canary not in caplog.text
+    assert browser_canary not in str(raised.value)
+    assert storage_canary not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_successful_shutdown_cleans_browser_and_storage(
+    monkeypatch, tmp_path
+) -> None:
+    main = _import_main(monkeypatch, tmp_path)
+    calls: list[str] = []
+
+    class Manager:
+        async def cleanup(self) -> None:
+            calls.append("browser")
+
+    class Storage:
+        def close(self) -> None:
+            calls.append("storage")
+
+    monkeypatch.setattr(main, "browser_manager", Manager())
+    monkeypatch.setattr(main, "storage", Storage())
+
+    await main.shutdown_event()
+
+    assert calls == ["browser", "storage"]
 
 
 @pytest.mark.asyncio
@@ -377,3 +440,38 @@ async def test_auth_status_exposes_only_stable_error_text(monkeypatch) -> None:
     assert status["status"] == "error"
     assert status["error"] == "Authentication failed"
     assert "browser-status-canary" not in status["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_browser_fallback_storage_always_closes(
+    monkeypatch, fails: bool
+) -> None:
+    """Fallback persistence releases its retained directory descriptor."""
+    from app.auth.browser import BrowserAuthManager
+    from app.storage import file_storage
+
+    closed = False
+
+    class TrackingStorage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            nonlocal closed
+            closed = True
+
+        async def save_cookies(self, _cookies):
+            if fails:
+                raise OSError("save failed")
+
+    monkeypatch.setattr(file_storage, "SharedStorage", TrackingStorage)
+    manager = BrowserAuthManager(storage=None)
+
+    if fails:
+        with pytest.raises(OSError, match="save failed"):
+            await manager._save_cookies([{"name": "SID"}])
+    else:
+        await manager._save_cookies([{"name": "SID"}])
+
+    assert closed

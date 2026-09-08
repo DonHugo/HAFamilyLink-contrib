@@ -2,6 +2,11 @@
 
 All notable changes to the Google Family Link Auth Add-on will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- Auth persistence now pins and locks a validated non-symlink storage directory, rejects special-file children, bounds reads, repairs private modes (`0700` for `/share/familylink`, `0600` for `.key`, `cookies.enc`, and `api_key`), and durably publishes credentials and cookie replacements with race-safe atomic operations. Corrupt cookies are retained for a subsequent atomic reauthentication save rather than deleted. Existing Fernet payloads and standalone `API_KEY` behavior are unchanged.
+
 ## [1.9.0] - 2026-09-04
 
 ### Security

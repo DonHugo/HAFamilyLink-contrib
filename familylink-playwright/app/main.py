@@ -3,7 +3,6 @@ import logging
 import os
 import secrets
 import sys
-from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, FileResponse
@@ -13,6 +12,7 @@ import uvicorn
 
 from app.auth.browser import BrowserAuthManager
 from app.storage.file_storage import SharedStorage
+from app.storage.secure_files import SecureDirectory, SecureFileError
 from app.config import get_config
 from app.privacy import get_privacy_logger
 from app.translations import get_translations
@@ -48,13 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API key for protecting the auth-flow endpoints (optional, env-provided)
-_API_KEY = os.getenv("API_KEY", "")
-# Supervisor add-on (HA OS/Supervised) injects SUPERVISOR_TOKEN; run.sh also
-# sets ADDON_MODE=1. In that mode the integration shares /share/familylink so
-# the cookie key is enforced with zero config. In Docker standalone there is no
-# shared volume, so an auto-generated key would break the integration.
-_ADDON_MODE = bool(os.getenv("SUPERVISOR_TOKEN") or os.getenv("ADDON_MODE"))
+_API_KEY_MAX_SIZE = 4096
 
 
 class AuthServiceStartupError(RuntimeError):
@@ -65,6 +59,40 @@ class AuthServiceShutdownError(RuntimeError):
     """Sanitized shutdown failure safe for framework logging."""
 
 
+def _normalize_api_key(value: str, *, source: str) -> str:
+    """Validate and normalize a bounded, printable ASCII API key."""
+    try:
+        raw = value.encode("ascii")
+    except UnicodeEncodeError as err:
+        raise SecureFileError(f"{source} API key is not ASCII") from err
+    normalized = value.strip()
+    encoded = normalized.encode("ascii")
+    if (
+        not encoded
+        or len(raw) > _API_KEY_MAX_SIZE
+        or any(byte < 0x20 or byte > 0x7E for byte in raw)
+    ):
+        raise SecureFileError(f"{source} API key is empty, unsafe, or oversized")
+    return normalized
+
+
+# API key for protecting the auth-flow endpoints (optional, env-provided)
+_API_KEY_ENV = os.getenv("API_KEY", "")
+try:
+    _API_KEY = (
+        _normalize_api_key(_API_KEY_ENV, source="Environment")
+        if _API_KEY_ENV
+        else ""
+    )
+except SecureFileError:
+    raise AuthServiceStartupError(
+        "Authentication service credential setup failed"
+    ) from None
+# Supervisor add-on (HA OS/Supervised) injects SUPERVISOR_TOKEN; run.sh also
+# sets ADDON_MODE=1. In that mode the integration shares /share/familylink so
+# the cookie key is enforced with zero config. In Docker standalone there is no
+# shared volume, so an auto-generated key would break the integration.
+_ADDON_MODE = bool(os.getenv("SUPERVISOR_TOKEN") or os.getenv("ADDON_MODE"))
 # Global instances
 try:
     storage = SharedStorage(config.share_dir)
@@ -96,23 +124,28 @@ def _load_or_create_cookie_api_key() -> "str | None":
             "separate API-key field to protect the endpoint."
         )
         return None
-    key_path = Path(config.share_dir) / "api_key"
+    def validate(value: bytes) -> None:
+        try:
+            decoded = value.decode("ascii")
+        except UnicodeDecodeError as err:
+            raise SecureFileError("Persisted API key is not ASCII") from err
+        _normalize_api_key(decoded, source="Persisted")
+
     try:
-        existing = key_path.read_text().strip()
-        if existing:
-            return existing
-    except OSError:
-        pass
-    key = secrets.token_urlsafe(32)
-    try:
-        key_path.write_text(key)
-        os.chmod(key_path, 0o600)
+        with SecureDirectory(config.share_dir) as files:
+            value, created = files.create_once(
+                "api_key",
+                secrets.token_urlsafe(32).encode("utf-8"),
+                _API_KEY_MAX_SIZE,
+                validate,
+            )
     except OSError:
         raise AuthServiceStartupError(
             "Authentication service credential setup failed"
         ) from None
-    _LOGGER.info(f"Generated cookie API key at {key_path}")
-    return key
+    if created:
+        _LOGGER.info("Generated cookie API key")
+    return _normalize_api_key(value.decode("ascii"), source="Persisted")
 
 
 _COOKIE_API_KEY = _load_or_create_cookie_api_key()
@@ -121,7 +154,12 @@ _COOKIE_API_KEY = _load_or_create_cookie_api_key()
 def _check_key(request: Request, expected: str):
     """Validate the request key against the expected one (constant-time)."""
     key = request.headers.get("X-API-Key") or request.query_params.get("api_key") or ""
-    if not secrets.compare_digest(key, expected):
+    try:
+        candidate = _normalize_api_key(key, source="Request")
+        valid = secrets.compare_digest(candidate, expected)
+    except (SecureFileError, TypeError):
+        valid = False
+    if not valid:
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
 
 
@@ -164,14 +202,24 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown."""
     _LOGGER.info("Shutting down Family Link Auth Service")
-    if browser_manager:
-        try:
+    failures: list[str] = []
+    try:
+        if browser_manager:
             await browser_manager.cleanup()
-        except Exception:
-            _LOGGER.error("Authentication service shutdown failed")
-            raise AuthServiceShutdownError(
-                "Authentication service shutdown failed"
-            ) from None
+    except BaseException:
+        failures.append("browser")
+        _LOGGER.event(logging.ERROR, operation="browser", status="failed")
+
+    try:
+        storage.close()
+    except BaseException:
+        failures.append("storage")
+        _LOGGER.event(logging.ERROR, operation="storage", status="failed")
+
+    if failures:
+        raise AuthServiceShutdownError(
+            "Authentication service shutdown failed"
+        ) from None
 
 
 @app.get("/", response_class=HTMLResponse)
