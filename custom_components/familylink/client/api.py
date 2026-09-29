@@ -2960,17 +2960,22 @@ class FamilyLinkClient:
 		downtime model key bedtime slots CAMQ*, issue #151) or, failing that,
 		when its id decodes to the bedtime rule type; the daily-limit row
 		reuses the bedtime id, so the [h, m] window shape is what excludes it.
+		Some accounts key their slots with a plain UUID instead of a CA* id
+		(issue #183): such a row is taken on its policy id alone, since a UUID
+		decodes to nothing, and rejected without one.
 		"""
 		if not (isinstance(row, list) and len(row) >= 5):
 			return False
-		if not (isinstance(row[0], str) and row[0].startswith("CA")):
+		if not (isinstance(row[0], str) and row[0]):
 			return False
 		# `type(...) is int` excludes bool, which would otherwise let True match day 1.
 		if not (type(row[1]) is int and row[1] == day):
 			return False
 		policy_id = row[7] if len(row) > 7 and isinstance(row[7], str) else None
 		attached_to_bedtime = bool(bedtime_rule_id) and policy_id == bedtime_rule_id
-		if not attached_to_bedtime and cls._slot_id_rule_type(row[0]) != cls._SLOT_TYPE_BEDTIME:
+		if not attached_to_bedtime and not (
+			row[0].startswith("CA") and cls._slot_id_rule_type(row[0]) == cls._SLOT_TYPE_BEDTIME
+		):
 			return False
 
 		def _is_hm(value: Any) -> bool:
@@ -3264,10 +3269,11 @@ class FamilyLinkClient:
 		id at [7] is authoritative; accounts on the newer downtime model also
 		key BEDTIME rows CAMQ* (issue #151), so a row attached to the bedtime
 		policy is never treated as school time, whatever its key decodes to.
+		A UUID-keyed row (issue #183) is taken on its policy id alone.
 		"""
 		if not (isinstance(row, list) and len(row) >= 5):
 			return False
-		if not (isinstance(row[0], str) and row[0].startswith("CA")):
+		if not (isinstance(row[0], str) and row[0]):
 			return False
 		if not (type(row[1]) is int and row[1] == day):
 			return False
@@ -3275,7 +3281,9 @@ class FamilyLinkClient:
 		if policy_id and bedtime_rule_id and policy_id == bedtime_rule_id:
 			return False
 		attached_to_school = bool(schooltime_rule_id) and policy_id == schooltime_rule_id
-		if not attached_to_school and cls._slot_id_rule_type(row[0]) != cls._SLOT_TYPE_SCHOOL_TIME:
+		if not attached_to_school and not (
+			row[0].startswith("CA") and cls._slot_id_rule_type(row[0]) == cls._SLOT_TYPE_SCHOOL_TIME
+		):
 			return False
 
 		def _is_hm(value: Any) -> bool:
