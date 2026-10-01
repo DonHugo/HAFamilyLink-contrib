@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.2.4] - 2026-10-01
+
+Two robustness corrections brought by reporters and contributors.
+
+### Fixed
+- **Weekly bedtime and school time writes failed with HTTP 400 on accounts whose slots are keyed by a UUID** (#183, thanks to @jeallen2 for the diagnosis) - The weekly slot matchers required a `CA*` protobuf id before looking at anything else, so on those accounts the day's slot was never found, the write fell back to the static day codes, and Google refused them. A row whose policy id (the revision id at index 7) is the bedtime or school time policy is now taken whatever its id looks like; the `CA*` prefix only gates the fallback that decodes the rule type from the id. A UUID row without a policy id is still not guessed at.
+- **A failed family members read fails the refresh instead of returning no children** (#184, thanks to @modert) - A DNS timeout or a 5xx on that one request was logged as a warning and the refresh carried on with zero supervised children: at startup no entities were created until a manual reload, and later refreshes blanked every child's data. The refresh now keeps the last known data, or reports the entry as not ready at startup so Home Assistant retries the setup by itself.
+
+---
+
 ## [2.2.3] - 2026-09-26
 
 One robustness correction for strict mode, seen live the same evening.
