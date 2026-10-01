@@ -222,7 +222,11 @@ class FamilyLinkDataUpdateCoordinator(DataUpdateCoordinator):
 		except SessionExpiredError:
 			raise  # Re-raise to trigger auth notification
 		except Exception as err:
-			_LOGGER.warning(f"Failed to fetch family members: {err}")
+			# Fail the refresh instead of continuing with zero children. An empty
+			# result creates no entities at startup and blanks every child's data
+			# afterwards; raising lets _async_update_data return _last_known_data,
+			# or raise UpdateFailed (ConfigEntryNotReady during setup) on first run.
+			raise FamilyLinkException(f"Failed to fetch family members: {err}") from err
 
 		if not supervised_children:
 			_LOGGER.warning("No supervised children found — entities will not be created. Check your Family Link account configuration.")
